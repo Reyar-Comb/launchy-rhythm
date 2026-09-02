@@ -2,12 +2,52 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { MidiManager } from './midi/midi-manager'
+import type {
+  ConnectMidiRequest,
+  MidiConnectionState,
+  MidiMessageEvent,
+  PadPaletteRequest,
+  PadRgbRequest
+} from '../shared/midi'
+
+let midiManager: MidiManager | null = null
+
+function broadcast(channel: string, payload: MidiMessageEvent | MidiConnectionState): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(channel, payload)
+  }
+}
+
+function registerMidiHandlers(): void {
+  midiManager = new MidiManager(
+    (event) => broadcast('midi:message', event),
+    (state) => broadcast('midi:connection', state)
+  )
+
+  ipcMain.handle('midi:get-ports', () => midiManager?.getPorts())
+  ipcMain.handle('midi:connect', (_event, request: ConnectMidiRequest) =>
+    midiManager?.connect(request)
+  )
+  ipcMain.handle('midi:disconnect', () => midiManager?.disconnect())
+  ipcMain.handle('midi:send', (_event, message: number[]) => midiManager?.send(message))
+  ipcMain.handle('midi:initialize-launchpad', () => midiManager?.initializeLaunchpad())
+  ipcMain.handle('midi:set-pad-rgb', (_event, request: PadRgbRequest) =>
+    midiManager?.setPadRgb(request)
+  )
+  ipcMain.handle('midi:set-pad-palette', (_event, request: PadPaletteRequest) =>
+    midiManager?.setPadPalette(request)
+  )
+  ipcMain.handle('midi:clear-launchpad', () => midiManager?.clearLaunchpad())
+}
 
 function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    width: 1180,
+    height: 760,
+    minWidth: 720,
+    minHeight: 560,
     show: false,
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
@@ -50,7 +90,7 @@ app.whenReady().then(() => {
   })
 
   // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
+  registerMidiHandlers()
 
   createWindow()
 
@@ -68,6 +108,10 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('before-quit', () => {
+  midiManager?.disconnect()
 })
 
 // In this file you can include the rest of your app's specific main process
