@@ -8,6 +8,7 @@ import type {
   PadPaletteRequest,
   PadRgbRequest
 } from '../shared/midi'
+import type { ProjectApi, TrackProject } from '../shared/project'
 
 // Custom APIs for renderer
 const midiApi: MidiApi = {
@@ -34,6 +35,15 @@ const midiApi: MidiApi = {
   }
 }
 
+const projectApi: ProjectApi = {
+  list: () => ipcRenderer.invoke('projects:list'),
+  create: () => ipcRenderer.invoke('projects:create'),
+  load: (id: string) => ipcRenderer.invoke('projects:load', id),
+  save: (project: TrackProject) => ipcRenderer.invoke('projects:save', project),
+  readAudio: (id: string) => ipcRenderer.invoke('projects:read-audio', id),
+  getStorageRoot: () => ipcRenderer.invoke('projects:get-storage-root')
+}
+
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise
 // just add to the DOM global.
@@ -41,6 +51,7 @@ if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('midi', midiApi)
+    contextBridge.exposeInMainWorld('projects', projectApi)
   } catch (error) {
     console.error(error)
   }
@@ -49,4 +60,6 @@ if (process.contextIsolated) {
   window.electron = electronAPI
   // @ts-ignore (define in dts)
   window.midi = midiApi
+  // @ts-ignore (define in dts)
+  window.projects = projectApi
 }

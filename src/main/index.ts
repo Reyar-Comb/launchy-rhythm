@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { MidiManager } from './midi/midi-manager'
+import { ProjectStore } from './projects/project-store'
 import type {
   ConnectMidiRequest,
   MidiConnectionState,
@@ -10,8 +11,10 @@ import type {
   PadPaletteRequest,
   PadRgbRequest
 } from '../shared/midi'
+import type { TrackProject } from '../shared/project'
 
 let midiManager: MidiManager | null = null
+let projectStore: ProjectStore | null = null
 
 function broadcast(channel: string, payload: MidiMessageEvent | MidiConnectionState): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -39,6 +42,18 @@ function registerMidiHandlers(): void {
     midiManager?.setPadPalette(request)
   )
   ipcMain.handle('midi:clear-launchpad', () => midiManager?.clearLaunchpad())
+}
+
+function registerProjectHandlers(store: ProjectStore): void {
+  ipcMain.handle('projects:list', () => store.list())
+  ipcMain.handle('projects:create', (event) => {
+    const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined
+    return store.create(parentWindow)
+  })
+  ipcMain.handle('projects:load', (_event, id: string) => store.load(id))
+  ipcMain.handle('projects:save', (_event, project: TrackProject) => store.save(project))
+  ipcMain.handle('projects:read-audio', (_event, id: string) => store.readAudio(id))
+  ipcMain.handle('projects:get-storage-root', () => store.rootPath)
 }
 
 function createWindow(): void {
@@ -78,7 +93,7 @@ function createWindow(): void {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
 
@@ -91,6 +106,9 @@ app.whenReady().then(() => {
 
   // IPC test
   registerMidiHandlers()
+  projectStore = new ProjectStore()
+  await projectStore.initialize()
+  registerProjectHandlers(projectStore)
 
   createWindow()
 

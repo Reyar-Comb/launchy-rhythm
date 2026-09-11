@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import EditorView from './views/EditorView.vue'
 import GameView from './views/GameView.vue'
 import LibraryView from './views/LibraryView.vue'
@@ -8,19 +8,7 @@ import MidiDebugView from './views/MidiDebugView.vue'
 type ViewName = 'library' | 'editor' | 'game' | 'debug'
 
 const currentView = ref<ViewName>('library')
-
-const currentComponent = computed(() => {
-  switch (currentView.value) {
-    case 'editor':
-      return EditorView
-    case 'game':
-      return GameView
-    case 'debug':
-      return MidiDebugView
-    default:
-      return LibraryView
-  }
-})
+const selectedTrackId = ref<string | null>(null)
 
 const navItems: Array<{ id: ViewName; label: string; caption: string }> = [
   { id: 'library', label: '歌曲库', caption: 'Tracks' },
@@ -30,6 +18,16 @@ const navItems: Array<{ id: ViewName; label: string; caption: string }> = [
 
 function navigate(view: ViewName): void {
   currentView.value = view
+}
+
+function openEditor(trackId?: string): void {
+  selectedTrackId.value = trackId ?? null
+  currentView.value = 'editor'
+}
+
+function startGame(trackId?: string): void {
+  selectedTrackId.value = trackId ?? null
+  currentView.value = 'game'
 }
 </script>
 
@@ -92,13 +90,24 @@ function navigate(view: ViewName): void {
           </div>
         </header>
         <div class="content-scroll">
-          <component
-            :is="currentComponent"
-            @open-editor="navigate('editor')"
-            @start-game="navigate('game')"
+          <LibraryView
+            v-if="currentView === 'library'"
+            @open-editor="openEditor"
+            @start-game="startGame"
             @open-debug="navigate('debug')"
+          />
+          <EditorView
+            v-else-if="currentView === 'editor'"
+            :track-id="selectedTrackId"
+            @track-selected="selectedTrackId = $event"
             @back="navigate('library')"
           />
+          <GameView
+            v-else-if="currentView === 'game'"
+            :track-id="selectedTrackId"
+            @back="navigate('library')"
+          />
+          <MidiDebugView v-else @back="navigate('library')" />
         </div>
       </section>
     </div>
