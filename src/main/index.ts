@@ -4,17 +4,20 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { MidiManager } from './midi/midi-manager'
 import { ProjectStore } from './projects/project-store'
+import { SettingsStore } from './settings/settings-store'
 import type {
   ConnectMidiRequest,
   MidiConnectionState,
   MidiMessageEvent,
   PadPaletteRequest,
+  PadRgbBatchRequest,
   PadRgbRequest
 } from '../shared/midi'
 import type { TrackProject } from '../shared/project'
 
 let midiManager: MidiManager | null = null
 let projectStore: ProjectStore | null = null
+let settingsStore: SettingsStore | null = null
 
 function broadcast(channel: string, payload: MidiMessageEvent | MidiConnectionState): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -38,6 +41,9 @@ function registerMidiHandlers(): void {
   ipcMain.handle('midi:set-pad-rgb', (_event, request: PadRgbRequest) =>
     midiManager?.setPadRgb(request)
   )
+  ipcMain.handle('midi:set-pads-rgb', (_event, request: PadRgbBatchRequest) =>
+    midiManager?.setPadsRgb(request)
+  )
   ipcMain.handle('midi:set-pad-palette', (_event, request: PadPaletteRequest) =>
     midiManager?.setPadPalette(request)
   )
@@ -52,8 +58,24 @@ function registerProjectHandlers(store: ProjectStore): void {
   })
   ipcMain.handle('projects:load', (_event, id: string) => store.load(id))
   ipcMain.handle('projects:save', (_event, project: TrackProject) => store.save(project))
+  ipcMain.handle('projects:delete', (_event, id: string) => store.delete(id))
+  ipcMain.handle('projects:choose-cover', (event, id: string) => {
+    const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined
+    return store.chooseCover(id, parentWindow)
+  })
   ipcMain.handle('projects:read-audio', (_event, id: string) => store.readAudio(id))
+  ipcMain.handle('projects:read-source-audio', (_event, id: string) => store.readSourceAudio(id))
+  ipcMain.handle('projects:read-cover', (_event, id: string) => store.readCover(id))
   ipcMain.handle('projects:get-storage-root', () => store.rootPath)
+}
+
+function registerSettingsHandlers(store: SettingsStore): void {
+  ipcMain.handle('settings:load-playfield-effects', () => store.loadPlayfieldEffects())
+  ipcMain.handle('settings:save-playfield-effects', (_event, settings) =>
+    store.savePlayfieldEffects(settings)
+  )
+  ipcMain.handle('settings:load-midi-input', () => store.loadMidiInput())
+  ipcMain.handle('settings:save-midi-input', (_event, settings) => store.saveMidiInput(settings))
 }
 
 function createWindow(): void {
@@ -109,6 +131,9 @@ app.whenReady().then(async () => {
   projectStore = new ProjectStore()
   await projectStore.initialize()
   registerProjectHandlers(projectStore)
+  settingsStore = new SettingsStore()
+  await settingsStore.initialize()
+  registerSettingsHandlers(settingsStore)
 
   createWindow()
 

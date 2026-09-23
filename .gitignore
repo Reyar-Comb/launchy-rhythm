@@ -5,3 +5,11 @@ out
 .eslintcache
 *.log*
 /tracks/
+*.tmp
+*.tmp.*
+*.bak
+.vite/
+.cache/
+release/
+# 本机 Electron 用户配置
+app-settings.json

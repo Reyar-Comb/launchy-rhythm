@@ -6,9 +6,11 @@ import type {
   MidiConnectionState,
   MidiMessageEvent,
   PadPaletteRequest,
+  PadRgbBatchRequest,
   PadRgbRequest
 } from '../shared/midi'
 import type { ProjectApi, TrackProject } from '../shared/project'
+import type { MidiInputSettings, PlayfieldEffectSettings, SettingsApi } from '../shared/settings'
 
 // Custom APIs for renderer
 const midiApi: MidiApi = {
@@ -18,6 +20,7 @@ const midiApi: MidiApi = {
   send: (message: number[]) => ipcRenderer.invoke('midi:send', message),
   initializeLaunchpad: () => ipcRenderer.invoke('midi:initialize-launchpad'),
   setPadRgb: (request: PadRgbRequest) => ipcRenderer.invoke('midi:set-pad-rgb', request),
+  setPadsRgb: (request: PadRgbBatchRequest) => ipcRenderer.invoke('midi:set-pads-rgb', request),
   setPadPalette: (request: PadPaletteRequest) =>
     ipcRenderer.invoke('midi:set-pad-palette', request),
   clearLaunchpad: () => ipcRenderer.invoke('midi:clear-launchpad'),
@@ -40,8 +43,21 @@ const projectApi: ProjectApi = {
   create: () => ipcRenderer.invoke('projects:create'),
   load: (id: string) => ipcRenderer.invoke('projects:load', id),
   save: (project: TrackProject) => ipcRenderer.invoke('projects:save', project),
+  delete: (id: string) => ipcRenderer.invoke('projects:delete', id),
+  chooseCover: (id: string) => ipcRenderer.invoke('projects:choose-cover', id),
   readAudio: (id: string) => ipcRenderer.invoke('projects:read-audio', id),
+  readSourceAudio: (id: string) => ipcRenderer.invoke('projects:read-source-audio', id),
+  readCover: (id: string) => ipcRenderer.invoke('projects:read-cover', id),
   getStorageRoot: () => ipcRenderer.invoke('projects:get-storage-root')
+}
+
+const settingsApi: SettingsApi = {
+  loadPlayfieldEffects: () => ipcRenderer.invoke('settings:load-playfield-effects'),
+  savePlayfieldEffects: (settings: PlayfieldEffectSettings) =>
+    ipcRenderer.invoke('settings:save-playfield-effects', settings),
+  loadMidiInput: () => ipcRenderer.invoke('settings:load-midi-input'),
+  saveMidiInput: (settings: MidiInputSettings) =>
+    ipcRenderer.invoke('settings:save-midi-input', settings)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to
@@ -52,6 +68,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('midi', midiApi)
     contextBridge.exposeInMainWorld('projects', projectApi)
+    contextBridge.exposeInMainWorld('settings', settingsApi)
   } catch (error) {
     console.error(error)
   }
@@ -62,4 +79,6 @@ if (process.contextIsolated) {
   window.midi = midiApi
   // @ts-ignore (define in dts)
   window.projects = projectApi
+  // @ts-ignore (define in dts)
+  window.settings = settingsApi
 }

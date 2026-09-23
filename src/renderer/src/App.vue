@@ -1,14 +1,20 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import EditorView from './views/EditorView.vue'
 import GameView from './views/GameView.vue'
 import LibraryView from './views/LibraryView.vue'
 import MidiDebugView from './views/MidiDebugView.vue'
+import { useMidiInput } from './composables/useMidiInput'
+import { usePlayfieldEffects } from './composables/usePlayfieldEffects'
+import { useProjects } from './composables/useProjects'
 
 type ViewName = 'library' | 'editor' | 'game' | 'debug'
 
 const currentView = ref<ViewName>('library')
 const selectedTrackId = ref<string | null>(null)
+const { load: loadPlayfieldEffects } = usePlayfieldEffects()
+const { load: loadMidiInput } = useMidiInput()
+const { tracks } = useProjects()
 
 const navItems: Array<{ id: ViewName; label: string; caption: string }> = [
   { id: 'library', label: '歌曲库', caption: 'Tracks' },
@@ -17,11 +23,18 @@ const navItems: Array<{ id: ViewName; label: string; caption: string }> = [
 ]
 
 function navigate(view: ViewName): void {
+  if (view === 'editor' && !selectedTrackId.value)
+    selectedTrackId.value = tracks.value[0]?.id ?? null
   currentView.value = view
 }
 
 function openEditor(trackId?: string): void {
-  selectedTrackId.value = trackId ?? null
+  const nextTrackId = trackId ?? tracks.value[0]?.id ?? null
+  if (!nextTrackId) {
+    currentView.value = 'library'
+    return
+  }
+  selectedTrackId.value = nextTrackId
   currentView.value = 'editor'
 }
 
@@ -29,6 +42,11 @@ function startGame(trackId?: string): void {
   selectedTrackId.value = trackId ?? null
   currentView.value = 'game'
 }
+
+onMounted(() => {
+  void loadPlayfieldEffects()
+  void loadMidiInput()
+})
 </script>
 
 <template>
@@ -39,7 +57,6 @@ function startGame(trackId?: string): void {
           <div class="brand-mark"><span></span><span></span><span></span><span></span></div>
           <div><strong>Launchy</strong><small>RHYTHM LAB</small></div>
         </div>
-
         <div class="sidebar-section-label">Workspace</div>
         <nav class="main-nav" aria-label="主导航">
           <button
@@ -56,7 +73,6 @@ function startGame(trackId?: string): void {
             >
           </button>
         </nav>
-
         <div class="sidebar-spacer"></div>
         <button
           class="debug-link"
@@ -66,10 +82,10 @@ function startGame(trackId?: string): void {
           <span>⌁</span><span><b>MIDI 测试台</b><small>Hardware lab</small></span>
         </button>
         <div class="sidebar-footer">
-          <span class="status-dot"></span><span>Launchpad X ready</span><small>v0.1 · macOS</small>
+          <span class="status-dot"></span><span>Hardware optional</span
+          ><small>v0.1 · Cross-platform</small>
         </div>
       </aside>
-
       <section class="content-area">
         <header class="content-topbar">
           <div class="breadcrumb">
@@ -85,8 +101,7 @@ function startGame(trackId?: string): void {
             }}</strong>
           </div>
           <div class="topbar-actions">
-            <span class="midi-chip"><span></span> Launchpad X</span
-            ><button class="icon-button" title="返回歌曲库" @click="navigate('library')">⌂</button>
+            <span class="midi-chip"><span></span> Launchpad optional</span>
           </div>
         </header>
         <div class="content-scroll">

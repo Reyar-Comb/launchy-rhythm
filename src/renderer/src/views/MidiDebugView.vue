@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import LaunchpadGrid from '../components/launchpad/LaunchpadGrid.vue'
 import type {
   MidiConnectionState,
@@ -7,8 +7,11 @@ import type {
   MidiPortInfo,
   MidiPortsResult
 } from '../../../shared/midi'
+import { useMidiInput } from '../composables/useMidiInput'
+import { usePlayfieldEffects } from '../composables/usePlayfieldEffects'
 
 type PadMode = 'steady' | 'flash' | 'pulse'
+type TriggerState = 'accepted' | 'below-threshold' | 'debounced' | 'other'
 
 const ports = ref<MidiPortsResult>({ inputs: [], outputs: [] })
 const selectedInput = ref<number | null>(null)
@@ -24,7 +27,21 @@ const manualMessage = ref('144,81,127')
 const hoveredNote = ref<number | null>(null)
 const statusText = ref('正在检查 MIDI 端口…')
 const isRefreshing = ref(false)
+const latestTriggerState = ref<TriggerState | null>(null)
 const maxMessages = 80
+const { velocityThreshold, doublePressMs, outerRingFadeMs, isNoteOnTrigger, acceptPadPress } =
+  useMidiInput()
+const {
+  playfieldBackgroundBrightness,
+  rippleDurationMs,
+  rippleRadius,
+  rippleWidth,
+  rippleFade,
+  rippleThreshold,
+  rippleGain,
+  rippleBrightness,
+  reset: resetPlayfieldEffects
+} = usePlayfieldEffects()
 let removeMessageListener: (() => void) | undefined
 let removeConnectionListener: (() => void) | undefined
 
@@ -134,11 +151,34 @@ async function sendManualMessage(): Promise<void> {
 function handleMessage(message: MidiMessageEvent): void {
   messages.value = [message, ...messages.value].slice(0, maxMessages)
   if (message.note === undefined) return
+
   const next = new Set(activeNotes.value)
-  if (message.type === 'Note On') next.add(message.note)
+  if (message.type === 'Note On') {
+    if (!isNoteOnTrigger(message)) {
+      latestTriggerState.value = 'below-threshold'
+    } else if (acceptPadPress(message.note)) {
+      latestTriggerState.value = 'accepted'
+      next.add(message.note)
+    } else {
+      latestTriggerState.value = 'debounced'
+    }
+  }
   if (message.type === 'Note Off') next.delete(message.note)
   activeNotes.value = next
 }
+
+const latestTriggerText = computed(() => {
+  switch (latestTriggerState.value) {
+    case 'accepted':
+      return '已触发'
+    case 'below-threshold':
+      return `力度低于 ${velocityThreshold.value}，忽略`
+    case 'debounced':
+      return `同 Pad ${doublePressMs.value}ms 防抖，忽略`
+    default:
+      return '等待 Note On'
+  }
+})
 
 onMounted(async () => {
   removeMessageListener = window.midi.onMessage(handleMessage)
@@ -254,6 +294,132 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="side-stack">
+        <div class="panel trigger-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Input config</p>
+              <h2>触发判定配置</h2>
+              <p>这些设置会立即影响测试台、制谱器 Real test 和正式游戏。</p>
+            </div>
+            <span class="hint-badge">Programmer Mode</span>
+          </div>
+
+          <div class="trigger-config-grid">
+            <label class="field">
+              <span>Note On 力度阈值：{{ velocityThreshold }}</span>
+              <input v-model.number="velocityThreshold" type="range" min="1" max="127" step="1" />
+            </label>
+            <label class="field">
+              <span>阈值数字输入</span>
+              <input
+                v-model.number="velocityThreshold"
+                class="control mono"
+                type="number"
+                min="1"
+                max="127"
+                step="1"
+              />
+            </label>
+            <label class="field">
+              <span>同 Pad 防抖：{{ doublePressMs }}ms</span>
+              <input v-model.number="doublePressMs" type="range" min="0" max="250" step="5" />
+            </label>
+            <label class="field">
+              <span>防抖数字输入</span>
+              <input
+                v-model.number="doublePressMs"
+                class="control mono"
+                type="number"
+                min="0"
+                max="250"
+                step="1"
+              />
+            </label>
+            <label class="field">
+              <span>外圈提前渐亮：{{ outerRingFadeMs }}ms</span>
+              <input v-model.number="outerRingFadeMs" type="range" min="0" max="2000" step="10" />
+            </label>
+            <label class="field">
+              <span>渐亮时长数字输入</span>
+              <input
+                v-model.number="outerRingFadeMs"
+                class="control mono"
+                type="number"
+                min="0"
+                max="2000"
+                step="10"
+              />
+            </label>
+          </div>
+
+          <div class="trigger-summary">
+            <strong>{{ latestTriggerText }}</strong>
+            <p>
+              Note On 的 velocity ≥ {{ velocityThreshold }} 才算触发；同一个 Pad 在
+              {{ doublePressMs }}ms 内重复触发会被忽略；Reveal 事件前 {{ outerRingFadeMs }}ms
+              外圈开始渐亮。未设置 Reveal 时，目标 Pad 会在 Play 段开始才全亮，但输入仍可提前。
+            </p>
+          </div>
+        </div>
+
+        <div class="panel effect-config-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Play light config</p>
+              <h2>游玩光效配置</h2>
+              <p>这些设置会立即影响游戏页和制谱器 Real test，并保存在本机。</p>
+            </div>
+            <button class="button button-small" @click="resetPlayfieldEffects">恢复默认</button>
+          </div>
+
+          <div class="effect-config-grid">
+            <label class="field field-wide">
+              <span>背景亮度（白色）：{{ playfieldBackgroundBrightness }}/64</span>
+              <input
+                v-model.number="playfieldBackgroundBrightness"
+                type="range"
+                min="0"
+                max="64"
+                step="1"
+              />
+            </label>
+            <label class="field">
+              <span>射线时长：{{ rippleDurationMs }}ms</span>
+              <input v-model.number="rippleDurationMs" type="range" min="80" max="600" step="10" />
+            </label>
+            <label class="field">
+              <span>射线距离：{{ rippleRadius.toFixed(1) }} 格</span>
+              <input v-model.number="rippleRadius" type="range" min="1.5" max="5" step="0.1" />
+            </label>
+            <label class="field">
+              <span>射线头部宽度：{{ rippleWidth.toFixed(2) }} 格</span>
+              <input v-model.number="rippleWidth" type="range" min="0.2" max="1.2" step="0.01" />
+            </label>
+            <label class="field">
+              <span>衰减：{{ rippleFade.toFixed(2) }}</span>
+              <input v-model.number="rippleFade" type="range" min="0.05" max="0.9" step="0.01" />
+            </label>
+            <label class="field">
+              <span>触发阈值：{{ rippleThreshold.toFixed(2) }}</span>
+              <input
+                v-model.number="rippleThreshold"
+                type="range"
+                min="0.02"
+                max="0.3"
+                step="0.01"
+              />
+            </label>
+            <label class="field">
+              <span>射线增益：{{ rippleGain.toFixed(1) }}×</span>
+              <input v-model.number="rippleGain" type="range" min="1" max="5" step="0.1" />
+            </label>
+            <label class="field">
+              <span>击打特效亮度：{{ rippleBrightness.toFixed(1) }}×</span>
+              <input v-model.number="rippleBrightness" type="range" min="0.2" max="3" step="0.1" />
+            </label>
+          </div>
+        </div>
+
         <div class="panel">
           <div class="panel-heading">
             <div>

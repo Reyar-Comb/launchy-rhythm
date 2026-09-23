@@ -45,6 +45,10 @@ export interface PadRgbRequest {
   blue: number
 }
 
+export interface PadRgbBatchRequest {
+  pads: PadRgbRequest[]
+}
+
 export interface PadPaletteRequest {
   note: number
   color: number
@@ -58,6 +62,7 @@ export interface MidiApi {
   send: (message: number[]) => Promise<{ ok: boolean; error?: string }>
   initializeLaunchpad: () => Promise<{ ok: boolean; error?: string }>
   setPadRgb: (request: PadRgbRequest) => Promise<{ ok: boolean; error?: string }>
+  setPadsRgb: (request: PadRgbBatchRequest) => Promise<{ ok: boolean; error?: string }>
   setPadPalette: (request: PadPaletteRequest) => Promise<{ ok: boolean; error?: string }>
   clearLaunchpad: () => Promise<{ ok: boolean; error?: string }>
   onMessage: (callback: (event: MidiMessageEvent) => void) => () => void

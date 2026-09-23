@@ -6,6 +6,7 @@ import type {
   MidiPortInfo,
   MidiPortsResult,
   PadPaletteRequest,
+  PadRgbBatchRequest,
   PadRgbRequest
 } from '../../shared/midi'
 
@@ -14,11 +15,18 @@ type ConnectionHandler = (state: MidiConnectionState) => void
 
 const PROGRAMMER_MODE = [0xf0, 0x00, 0x20, 0x29, 0x02, 0x0c, 0x0e, 0x01, 0xf7]
 const PROGRAMMER_LAYOUT = [0xf0, 0x00, 0x20, 0x29, 0x02, 0x0c, 0x00, 0x7f, 0xf7]
+const SYSEX_HEADER = [0xf0, 0x00, 0x20, 0x29, 0x02, 0x0c]
+const LED_LIGHTING_COMMAND = 0x03
+const RGB_COLOUR_SPEC = 0x03
+const MAX_COLOUR_SPECS = 81
+const FRAME_PREFIX_LENGTH = SYSEX_HEADER.length + 1
+const FRAME_BUFFER_SIZE = FRAME_PREFIX_LENGTH + MAX_COLOUR_SPECS * 5 + 1
 
 export class MidiManager {
   private input: Input | null = null
   private output: Output | null = null
   private connection: MidiConnectionState = { connected: false }
+  private readonly ledFrame = Buffer.allocUnsafe(FRAME_BUFFER_SIZE)
 
   constructor(
     private readonly onMessage: MessageHandler,
@@ -105,12 +113,30 @@ export class MidiManager {
   }
 
   setPadRgb(request: PadRgbRequest): { ok: boolean; error?: string } {
-    const note = this.clamp(request.note, 0, 127)
-    const red = this.clamp(request.red, 0, 127)
-    const green = this.clamp(request.green, 0, 127)
-    const blue = this.clamp(request.blue, 0, 127)
+    return this.setPadsRgb({ pads: [request] })
+  }
 
-    return this.send([0xf0, 0x00, 0x20, 0x29, 0x02, 0x0c, 0x03, 0x03, note, red, green, blue, 0xf7])
+  setPadsRgb(request: PadRgbBatchRequest): { ok: boolean; error?: string } {
+    if (!this.output || !this.connection.connected) {
+      return { ok: false, error: '尚未连接 MIDI 输出端口' }
+    }
+
+    const padsByNote = new Map<number, PadRgbRequest>()
+    for (const pad of request.pads) {
+      padsByNote.set(this.clamp(pad.note, 0, 127), pad)
+    }
+    const pads = [...padsByNote.values()]
+    if (pads.length === 0) return { ok: true }
+
+    try {
+      for (let offset = 0; offset < pads.length; offset += MAX_COLOUR_SPECS) {
+        const length = this.writeLedFrame(pads.slice(offset, offset + MAX_COLOUR_SPECS))
+        this.output.sendMessage(this.ledFrame.subarray(0, length))
+      }
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: this.errorMessage(error) }
+    }
   }
 
   setPadPalette(request: PadPaletteRequest): { ok: boolean; error?: string } {
@@ -119,13 +145,31 @@ export class MidiManager {
   }
 
   clearLaunchpad(): { ok: boolean; error?: string } {
-    for (let row = 1; row <= 8; row += 1) {
-      for (let column = 1; column <= 8; column += 1) {
-        const result = this.send([0x90, row * 10 + column, 0])
-        if (!result.ok) return result
-      }
+    const pads = Array.from({ length: 64 }, (_, index) => {
+      const row = Math.floor(index / 8) + 1
+      const column = (index % 8) + 1
+      return { note: row * 10 + column, red: 0, green: 0, blue: 0 }
+    })
+    return this.setPadsRgb({ pads })
+  }
+
+  private writeLedFrame(pads: PadRgbRequest[]): number {
+    let offset = 0
+    for (const byte of SYSEX_HEADER) {
+      this.ledFrame[offset++] = byte
     }
-    return { ok: true }
+    this.ledFrame[offset++] = LED_LIGHTING_COMMAND
+
+    for (const pad of pads) {
+      this.ledFrame[offset++] = RGB_COLOUR_SPEC
+      this.ledFrame[offset++] = this.clamp(pad.note, 0, 127)
+      this.ledFrame[offset++] = this.clampRgb(pad.red)
+      this.ledFrame[offset++] = this.clampRgb(pad.green)
+      this.ledFrame[offset++] = this.clampRgb(pad.blue)
+    }
+
+    this.ledFrame[offset++] = 0xf7
+    return offset
   }
 
   private readPorts(device: Input | Output, direction: 'input' | 'output'): MidiPortInfo[] {
@@ -266,6 +310,12 @@ export class MidiManager {
 
   private clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, Math.round(value)))
+  }
+
+  private clampRgb(value: number): number {
+    const normalized = Number(value)
+    if (!Number.isFinite(normalized)) return 0
+    return Math.min(127, Math.max(0, Math.round((normalized / 255) * 127)))
   }
 
   private errorMessage(error: unknown): string {
